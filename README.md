@@ -1,42 +1,58 @@
 # pca9536-driver
-Easy-to-use python driver for the PCA9536 GPIO expander.
+
+Easy-to-use Python driver for the PCA9536 GPIO expander.
+
+Forked from [rogiervandergeer/pca9536-driver](https://github.com/rogiervandergeer/pca9536-driver).
+This fork removes the `smbus2` dependency and communicates directly with the Linux `/dev/i2c-N`
+character device, making it suitable for embedded Linux systems without PyPI access.
 
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/rogiervandergeer/pca9536-driver/test.yaml?branch=main) 
-![PyPI](https://img.shields.io/pypi/v/pca9536-driver)
 ![PyPI - License](https://img.shields.io/pypi/l/pca9536-driver)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/pca9536-driver) 
 
 ## Installation
 
-The package is available on [PyPI](https://pypi.org/project/pca9536-driver/). Installation is can be done with your favourite package manager. For example:
-
-```bash
-pip install pca9536-driver
-```
+Copy the `pca9536/` package directory to your project or onto the target system. No external
+dependencies are required.
 
 ## Tests
 
-Run test with:
-
-```
-PYTHONPATH=src; python3 -m pytest
+```bash
+PYTHONPATH=src python3 -m pytest
 ```
 
 ## Usage
 
-In order to initialise the device we need an open `SMBus` object. 
-Depending on the machine that you are running on you may need to provide another bus number or path:
+Initialise the device by passing the I2C bus number. The bus can be specified as:
+- an integer: `1` resolves to `/dev/i2c-1`
+- a device path: `"/dev/i2c-1"`
+- a sysfs path containing `i2c-N`: `"/sys/bus/i2c/devices/i2c-1"`
+
 ```python
 from pca9536 import PCA9536
-from smbus2 import SMBus
 
-
-with SMBus(1) as bus:
-    device = PCA9536(bus=bus)
+with PCA9536(bus=1) as device:
+    ...
 ```
 
-The address of the `PCA9536` defaults to `0x41`. This is the (fixed) address of the PCA9536 devices, so you should
-never have to change it. If you _do_ want to change it, you can provide it like `PCA9536(bus=bus, address=0x42)`.
+The address of the `PCA9536` defaults to `0x41`. If needed it can be overridden:
+```python
+PCA9536(bus=1, address=0x42)
+```
+
+### Probing
+
+Before opening the device you can check whether it is present on the bus:
+```python
+device = PCA9536(bus=1)
+if device.probe():
+    ...
+```
+
+You can also probe a different bus or address:
+```python
+if device.probe(bus=3):
+    ...
+```
 
 ### Controlling a pin
 
