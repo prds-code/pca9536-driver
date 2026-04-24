@@ -14,6 +14,14 @@ The package is available on [PyPI](https://pypi.org/project/pca9536-driver/). In
 pip install pca9536-driver
 ```
 
+## Tests
+
+Run test with:
+
+```
+PYTHONPATH=src; python3 -m pytest
+```
+
 ## Usage
 
 In order to initialise the device we need an open `SMBus` object. 

@@ -1,12 +1,10 @@
 from time import sleep
 
 from pca9536 import PCA9536
-from smbus2 import SMBus
 
 
 def main():
-    with SMBus(1) as bus:  # You may need to change the bus
-        device = PCA9536(bus=bus)
+    with PCA9536(bus=1) as device:  # You may need to change the bus number
         device.mode = "input"  # Set the mode of all pins to input.
         while True:
             inputs = device.read()

@@ -1,7 +1,25 @@
+import fcntl
+import os
+import re
 from enum import Enum
-from typing import List, Union, Tuple, Optional, Iterator
+from typing import Iterator, List, Optional, Tuple, Union
 
-from smbus2 import SMBus
+I2C_SLAVE = 0x0703
+
+
+def _resolve_bus_path(bus: Union[int, str]) -> str:
+    if isinstance(bus, int):
+        return f"/dev/i2c-{bus}"
+    match = re.search(r"i2c-(\d+)", bus)
+    if match:
+        return f"/dev/i2c-{match.group(1)}"
+    return bus
+
+
+def _open_i2c(path: str, address: int) -> int:
+    fd = os.open(path, os.O_RDWR)
+    fcntl.ioctl(fd, I2C_SLAVE, address)
+    return fd
 
 
 class PinMode(Enum):
@@ -13,11 +31,6 @@ class PCA9536Pin:
     """A single pin of the PCA9536 GPIO expander."""
 
     def __init__(self, device: "PCA9536", index: int):
-        """Initialise the PCA9536Pin.
-
-        Args:
-            device: A PCA9536 object.
-            index: The pin index, 0 through 3."""
         self.device = device
         self.index = index
 
@@ -66,7 +79,6 @@ class PCA9536Pin:
         self.device.write(*self._value_to_list(value))
 
     def _value_to_list(self, value) -> Tuple:
-        """Helper function to produce inputs for the function calls to the PCA9536."""
         result = [None, None, None, None]
         result[self.index] = value
         return tuple(result)
@@ -75,22 +87,56 @@ class PCA9536Pin:
 class PCA9536:
     """Driver for the PCA9536 GPIO expander."""
 
-    def __init__(self, bus: SMBus, address: int = 0x41):
+    def __init__(self, bus: Union[int, str], address: int = 0x41) -> None:
         """Initialise the PCA9536.
 
         Args:
-            bus: An open SMBus object.
-            address: The I2C address of the device. Defaults to 0x41.
-                Since it is fixed, one should never have to change this."""
+            bus: I2C bus — an integer (e.g. 1 for /dev/i2c-1), a /dev/i2c-N path,
+                or a sysfs path containing i2c-N (e.g. /sys/bus/i2c/devices/i2c-1).
+            address: The I2C address of the device. Defaults to 0x41."""
         self.address = address
-        self.bus = bus
+        self._path = _resolve_bus_path(bus)
+        self._fd: int = _open_i2c(self._path, self.address)
         self._pins: List[PCA9536Pin] = [PCA9536Pin(self, index) for index in range(4)]
+
+    def __enter__(self) -> "PCA9536":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._fd >= 0:
+            os.close(self._fd)
+            self._fd = -1
 
     def __getitem__(self, item: int) -> PCA9536Pin:
         return self._pins[item]
 
     def __iter__(self) -> Iterator[PCA9536Pin]:
         yield from self._pins
+
+    def probe(self, bus: Optional[Union[int, str]] = None, address: int = 0x41) -> bool:
+        """Detect whether a PCA9536 is present at the given bus and address.
+
+        Returns True if the device acknowledges, False otherwise."""
+
+        if bus is not None:
+            path = _resolve_bus_path(bus)
+        else:
+            path = self._path
+
+        try:
+            fd = _open_i2c(path, address)
+            try:
+                os.write(fd, bytes(0))
+                return True
+            except OSError:
+                return False
+            finally:
+                os.close(fd)
+        except OSError:
+            return False
 
     @property
     def mode(self) -> Tuple[PinMode, PinMode, PinMode, PinMode]:
@@ -116,9 +162,7 @@ class PCA9536:
             device.mode = "output"
             device.mode = PinMode.input, "output", "input", None
         """
-        data = _read_bits(
-            bus=self.bus, address=self.address, register=0x03, bitmask=0x0F
-        )
+        data = _read_bits(fd=self._fd, register=0x03, bitmask=0x0F)
         return (
             PinMode(data & 0x01),
             PinMode((data & 0x02) >> 1),
@@ -147,13 +191,7 @@ class PCA9536:
         ]
         bitmask = _bools_to_bits(*(value is not None for value in values))
         mode = _bools_to_bits(*(value == PinMode.input for value in values))
-        _write_bits(
-            bus=self.bus,
-            address=self.address,
-            register=0x03,
-            value=mode,
-            bitmask=bitmask,
-        )
+        _write_bits(fd=self._fd, register=0x03, value=mode, bitmask=bitmask)
 
     @property
     def polarity_inversion(self) -> Tuple[bool, bool, bool, bool]:
@@ -175,9 +213,7 @@ class PCA9536:
         In such a tuple values can be None in order to leave them unchanged:
 
             device.polarity_inversion = False, None, True, True"""
-        data = _read_bits(
-            bus=self.bus, address=self.address, register=0x02, bitmask=0x0F
-        )
+        data = _read_bits(fd=self._fd, register=0x02, bitmask=0x0F)
         return (
             bool(data & 0x01),
             bool((data & 0x02) >> 1),
@@ -202,13 +238,7 @@ class PCA9536:
             value = value, value, value, value
         bitmask = _bools_to_bits(*(value is not None for value in value))
         polarity = _bools_to_bits(*(value is True for value in value))
-        _write_bits(
-            bus=self.bus,
-            address=self.address,
-            register=0x02,
-            value=polarity,
-            bitmask=bitmask,
-        )
+        _write_bits(fd=self._fd, register=0x02, value=polarity, bitmask=bitmask)
 
     def read(self) -> Tuple[bool, bool, bool, bool]:
         """Read the current logic levels.
@@ -217,9 +247,7 @@ class PCA9536:
 
         If the polarity inversion if False, this returns True if the logic level is high,
         and low if it is False. If the polarity inversion is True, these values are inverted."""
-        data = _read_bits(
-            bus=self.bus, address=self.address, register=0x00, bitmask=0x0F
-        )
+        data = _read_bits(fd=self._fd, register=0x00, bitmask=0x0F)
         return _bits_to_bools(data)
 
     def write(
@@ -238,13 +266,7 @@ class PCA9536:
         pins = (pin_0, pin_1, pin_2, pin_3)
         value = _bools_to_bits(*(pin is True for pin in pins))
         bitmask = _bools_to_bits(*(pin is not None for pin in pins))
-        _write_bits(
-            bus=self.bus,
-            address=self.address,
-            register=0x01,
-            value=value,
-            bitmask=bitmask,
-        )
+        _write_bits(fd=self._fd, register=0x01, value=value, bitmask=bitmask)
 
 
 def _bools_to_bits(bool_0: bool, bool_1: bool, bool_2: bool, bool_3: bool) -> int:
@@ -260,15 +282,12 @@ def _bits_to_bools(bits: int) -> Tuple[bool, bool, bool, bool]:
     )
 
 
-def _read_bits(bus: SMBus, address: int, register: int, bitmask: int) -> int:
-    return bus.read_byte_data(address, register=register) & bitmask
+def _read_bits(fd: int, register: int, bitmask: int) -> int:
+    os.write(fd, bytes([register]))
+    return os.read(fd, 1)[0] & bitmask
 
 
-def _write_bits(
-    bus: SMBus, address: int, register: int, value: int, bitmask: int
-) -> None:
-    other_bits = _read_bits(
-        bus=bus, address=address, register=register, bitmask=0xFF - bitmask
-    )
+def _write_bits(fd: int, register: int, value: int, bitmask: int) -> None:
+    other_bits = _read_bits(fd=fd, register=register, bitmask=0xFF - bitmask)
     value_bits = value & bitmask
-    bus.write_byte_data(address, register=register, value=other_bits | value_bits)
+    os.write(fd, bytes([register, other_bits | value_bits]))

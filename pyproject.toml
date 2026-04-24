@@ -17,9 +17,7 @@ classifiers = [
     "Topic :: System :: Hardware :: Hardware Drivers",
     "Typing :: Typed",
 ]
-dependencies = [
-    "smbus2 >= 0.3.0"
-]
+dependencies = []
 dynamic = ["version"]
 
 [project.urls]

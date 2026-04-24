@@ -1,10 +1,8 @@
 from pca9536 import PCA9536
-from smbus2 import SMBus
 
 
 def main():
-    with SMBus(1) as bus:  # You may need to change the bus
-        device = PCA9536(bus=bus)
+    with PCA9536(bus=1) as device:  # You may need to change the bus number
         pin_0, pin_1 = device[0], device[1]
         pin_0.mode = "input"
         pin_1.mode = "output"
