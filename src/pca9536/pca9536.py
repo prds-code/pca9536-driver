@@ -2,7 +2,9 @@ import fcntl
 import os
 import re
 from enum import Enum
-from typing import Iterator, List, Optional, Tuple, Union
+from typing import Iterator, List, Optional, Tuple, TypeVar, Union
+
+_T = TypeVar('_T')
 
 I2C_SLAVE = 0x0703
 
@@ -46,7 +48,7 @@ class PCA9536Pin:
 
     @mode.setter
     def mode(self, value: Union[PinMode, str]) -> None:
-        self.device.mode = self._value_to_list(value)  # type: ignore
+        self.device.mode = self._value_to_list(value)
 
     @property
     def polarity_inversion(self) -> bool:
@@ -60,7 +62,7 @@ class PCA9536Pin:
 
     @polarity_inversion.setter
     def polarity_inversion(self, value: bool) -> None:
-        self.device.polarity_inversion = self._value_to_list(value)  # type: ignore
+        self.device.polarity_inversion = self._value_to_list(value)
 
     def read(self) -> bool:
         """Read the current logic level.
@@ -78,10 +80,10 @@ class PCA9536Pin:
         is set to input, this has no effect on the logic level."""
         self.device.write(*self._value_to_list(value))
 
-    def _value_to_list(self, value) -> Tuple:
-        result = [None, None, None, None]
+    def _value_to_list(self, value: _T) -> Tuple[Optional[_T], Optional[_T], Optional[_T], Optional[_T]]:
+        result: List[Optional[_T]] = [None, None, None, None]
         result[self.index] = value
-        return tuple(result)
+        return (result[0], result[1], result[2], result[3])
 
 
 class PCA9536:
